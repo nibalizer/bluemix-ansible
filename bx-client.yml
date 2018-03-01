@@ -1,44 +1,76 @@
 ---
-
+# Playbook to install IBM Bluemix CLI
 - hosts: all
-  become: true
-  tasks:
-  - debug: msg="Installing bluemix client utils"
-
-  - name: "Install jq"
-    package:
-      name: jq
-      update_cache: yes
-
-  - name: Get latest bx cli url
-    shell: curl -s https://clis.ng.bluemix.net/all_versions  | jq --raw-output '.[0].binaries["linux64"].url'
-    register: bx_url
-    args:
-      warn: false
-
-  - name: Get blumix cli tarball
-    get_url:
-      url: "{{ bx_url.stdout }}"
-      dest: /root/
-      mode: 0755
-    register: bx_tarball
-
-  - name: untar bx cli tarball
-    unarchive:
-      src: "{{ bx_tarball.dest }}"
-      dest: /root/
-      remote_src: yes
-
-  - name: install bluemix cli using provided script
-    command: /root/Bluemix_CLI/install_bluemix_cli
-
-  - name: configure bx cli to not send usage information
-    command: /usr/local/bin/bluemix config --usage-stats-collect false
-
-  - name: install bluemix plugins
-    command: /usr/local/bin/bluemix plugin install "{{ item }}" -r Bluemix -f
-    with_items:
+  vars:
+    bx_plugins:
       - auto-scaling
-      - container-service
-      - container-registry
       - cloud-functions
+      - container-registry
+      - container-service
+  pre_tasks:
+    - name: Verify Ansible meets version requirements.
+      assert:
+        that: "ansible_version.full | version_compare('2.4', '>=')"
+        msg: >
+          "You must update Ansible to at least 2.4."
+  tasks:
+    - name: Check for Bluemix installation
+      command: /usr/local/bin/bluemix help
+      register: bx_client
+      changed_when: false
+      ignore_errors: true
+    
+    - name: Install bluemix client utils
+      become: true
+      when: bx_client.rc != 0
+      block:
+        - name: Get latest bx cli url
+          shell: curl -s https://clis.ng.bluemix.net/all_versions
+          register: bx_all_versions
+          args:
+            warn: false
+            
+        - set_fact:
+            bx_json: "{{ bx_all_versions.stdout | from_json }}"
+
+        - set_fact:
+            bx_url: "{{ bx_json[0].binaries['linux64'].url }}"
+            bx_checksum: "{{ bx_json[0].binaries['linux64'].checksum }}"
+
+        - name: Get blumix cli tarball
+          get_url:
+            url: "{{ bx_url }}"
+            checksum: 'sha1{{ ":" }}{{ bx_checksum }}'
+            dest: /root/
+            mode: 0755
+          register: bx_tarball
+
+        - name: untar bx cli tarball
+          unarchive:
+            src: "{{ bx_tarball.dest }}"
+            dest: /root/
+            remote_src: yes
+
+        - name: install bluemix cli using provided script
+          command: /root/Bluemix_CLI/install_bluemix_cli
+
+        - name: configure bx cli to not send usage information
+          command: /usr/local/bin/bluemix config --usage-stats-collect false
+
+    - name: Check for Bluemix Plugins
+      # If this fails maybe IBM changed the format of ``bluemix plugin list`` this is what I expect:
+      # Listing installed plug-ins...
+      # 
+      # Plugin Name          Version
+      # auto-scaling         0.2.5
+      # cloud-functions      1.0.8
+      # container-registry   0.1.292
+      # container-service    0.1.461
+      # 
+      shell: /usr/local/bin/bluemix plugin list |& awk 'f&&$1{print $1};/^Plugin/{f=1} END{if(NR==0){exit 1}}'
+      register: installed_bx_plugins
+      changed_when: false
+      
+    - name: Installing Bluemix plugins to Vagrant user
+      command: /usr/local/bin/bluemix plugin install "{{ item }}" -r Bluemix -f
+      with_items: "{{ bx_plugins | difference(installed_bx_plugins.stdout_lines) }}"
