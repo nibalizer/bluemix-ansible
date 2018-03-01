@@ -36,7 +36,7 @@
     command: /usr/local/bin/bluemix config --usage-stats-collect false
 
   - name: install bluemix plugins
-    command: /usr/local/bin/bluemix plugin install "{{ item }}" -r Bluemix
+    command: /usr/local/bin/bluemix plugin install "{{ item }}" -r Bluemix -f
     with_items:
       - auto-scaling
       - container-service
