@@ -1,3 +1,4 @@
+---
 
 - hosts: all
   become: true
@@ -5,25 +6,26 @@
   - debug: msg="Installing bluemix client utils"
 
   - name: "Install jq"
-    apt:
+    package:
       name: jq
       update_cache: yes
 
-  - name: Get latest bx cli version
-    shell: curl -s https://clis.ng.bluemix.net/all_versions  | jq '.[0].version' | tr -d '"'
-    register: bx_version
-
-  - debug: msg="bxcli version {{ bx_version }}"
+  - name: Get latest bx cli url
+    shell: curl -s https://clis.ng.bluemix.net/all_versions  | jq --raw-output '.[0].binaries["linux64"].url'
+    register: bx_url
+    args:
+      warn: false
 
   - name: Get blumix cli tarball
     get_url:
-      url: "https://public.dhe.ibm.com/cloud/bluemix/cli/bluemix-cli/Bluemix_CLI_{{ bx_version.stdout }}_amd64.tar.gz"
-      dest: /root/Bluemix_CLI_{{ bx_version.stdout }}_amd64.tar.gz
+      url: "{{ bx_url.stdout }}"
+      dest: /root/
       mode: 0755
+    register: bx_tarball
 
   - name: untar bx cli tarball
     unarchive:
-      src: /root/Bluemix_CLI_{{ bx_version.stdout }}_amd64.tar.gz
+      src: "{{ bx_tarball.dest }}"
       dest: /root/
       remote_src: yes
 
@@ -31,10 +33,10 @@
     command: /root/Bluemix_CLI/install_bluemix_cli
 
   - name: configure bx cli to not send usage information
-    command: bluemix config --usage-stats-collect false
+    command: /usr/local/bin/bluemix config --usage-stats-collect false
 
   - name: install bluemix plugins
-    command: bluemix plugin install "{{ item }}" -r Bluemix
+    command: /usr/local/bin/bluemix plugin install "{{ item }}" -r Bluemix
     with_items:
       - auto-scaling
       - container-service
